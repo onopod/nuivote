@@ -1,32 +1,20 @@
-import { loadState } from './_store.js';
+import { loadBallots, loadVoters } from './_store.js';
 
-const COOLDOWN_MS = 8 * 60 * 60 * 1000;
+function getVoterFingerprint(req) {
+  const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0].trim();
+  const ua = String(req.headers['user-agent'] || '').trim();
+  return `${ip}::${ua}`;
+}
 
 export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
-  }
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
 
-  const userId = String(req.query.userId || '').trim();
-  if (!userId) {
-    return res.status(400).json({ error: 'userId は必須です。' });
-  }
+  const categoryId = Number(req.query.categoryId || 1);
+  const [ballots, voters] = await Promise.all([loadBallots(), loadVoters()]);
+  const category = ballots.find((b) => b.id === categoryId);
+  if (!category) return res.status(404).json({ error: '投票カテゴリが見つかりません。' });
 
-  const state = await loadState();
-  const userVotes = state[userId] || {};
-  const now = Date.now();
-
-  const items = ['A', 'B', 'C'].map((item) => {
-    const lastVoteAt = userVotes[item] || 0;
-    const nextVoteAt = lastVoteAt ? lastVoteAt + COOLDOWN_MS : 0;
-    return {
-      item,
-      canVote: !lastVoteAt || now >= nextVoteAt,
-      lastVoteAt,
-      nextVoteAt,
-      remainingMs: nextVoteAt > now ? nextVoteAt - now : 0,
-    };
-  });
-
-  return res.status(200).json({ userId, items });
+  const fingerprint = getVoterFingerprint(req);
+  const votedDetail = voters[fingerprint] || null;
+  return res.status(200).json({ voted: Boolean(votedDetail), category, votedDetail });
 }

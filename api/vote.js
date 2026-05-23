@@ -1,45 +1,34 @@
-import { loadState, saveState } from './_store.js';
+import { loadBallots, loadVoters, saveBallots, saveVoters } from './_store.js';
 
-const COOLDOWN_MS = 8 * 60 * 60 * 1000;
-const VALID_ITEMS = new Set(['A', 'B', 'C']);
+function getVoterFingerprint(req) {
+  const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0].trim();
+  const ua = String(req.headers['user-agent'] || '').trim();
+  return `${ip}::${ua}`;
+}
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
-  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
-  const { userId, item } = req.body || {};
-  const cleanUserId = String(userId || '').trim();
-  const cleanItem = String(item || '').trim();
+  const { categoryId, optionName } = req.body || {};
+  const id = Number(categoryId);
+  const name = String(optionName || '').trim();
+  if (!Number.isInteger(id) || !name) return res.status(400).json({ error: 'categoryId と optionName は必須です。' });
 
-  if (!cleanUserId || !VALID_ITEMS.has(cleanItem)) {
-    return res.status(400).json({ error: 'userId と item(A/B/C) は必須です。' });
-  }
+  const fingerprint = getVoterFingerprint(req);
+  if (!fingerprint || fingerprint === '::') return res.status(400).json({ error: '投票者の識別に失敗しました。' });
 
-  const state = await loadState();
-  const now = Date.now();
+  const [ballots, voters] = await Promise.all([loadBallots(), loadVoters()]);
+  if (voters[fingerprint]) return res.status(409).json({ error: 'このブラウザ/IPからは既に投票済みです。' });
 
-  state[cleanUserId] ||= {};
+  const category = ballots.find((b) => b.id === id);
+  if (!category) return res.status(404).json({ error: '投票カテゴリが見つかりません。' });
 
-  const lastVoteAt = state[cleanUserId][cleanItem] || 0;
-  const nextVoteAt = lastVoteAt + COOLDOWN_MS;
+  const option = category.options.find((o) => o.name === name);
+  if (!option) return res.status(404).json({ error: '投票項目が見つかりません。' });
 
-  if (lastVoteAt && now < nextVoteAt) {
-    return res.status(429).json({
-      error: 'まだ投票できません。',
-      remainingMs: nextVoteAt - now,
-      nextVoteAt,
-    });
-  }
+  option.count += 1;
+  voters[fingerprint] = { categoryId: id, optionName: name, votedAt: Date.now() };
 
-  state[cleanUserId][cleanItem] = now;
-  await saveState(state);
-
-  return res.status(200).json({
-    ok: true,
-    userId: cleanUserId,
-    item: cleanItem,
-    votedAt: now,
-    nextVoteAt: now + COOLDOWN_MS,
-  });
+  await Promise.all([saveBallots(ballots), saveVoters(voters)]);
+  return res.status(200).json({ ok: true, categoryId: id, optionName: name });
 }
