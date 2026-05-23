@@ -9,3 +9,9 @@ test('public/index.html が存在する', () => {
 test('api/vote.js が存在する', () => {
   assert.equal(fs.existsSync('api/vote.js'), true);
 });
+
+test('デフォルト投票カテゴリが2件定義されている', () => {
+  const src = fs.readFileSync('api/_store.js', 'utf8');
+  assert.match(src, /id:\s*1[\s\S]*あなたの好きな動物は？/);
+  assert.match(src, /id:\s*2[\s\S]*今向いている方角は？/);
+});
