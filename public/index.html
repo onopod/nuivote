@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>8時間クールダウン投票</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+      h1 { font-size: 1.4rem; }
+      .row { margin-bottom: 1rem; }
+      button { margin-right: .5rem; margin-top: .5rem; padding: .5rem .8rem; }
+      .item { border: 1px solid #ddd; border-radius: 8px; padding: .75rem; margin-top: .5rem; }
+      .muted { color: #666; font-size: .9rem; }
+      #message { margin-top: 1rem; font-weight: bold; }
+      code { background: #f4f4f4; padding: 0.1rem 0.3rem; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <h1>投票アプリ（8時間で再投票可能）</h1>
+    <p class="muted">保存先: Vercel Blob（サーバー側で管理）</p>
+    <div class="row">
+      <label>
+        ユーザーID:
+        <input id="userId" placeholder="例: user-001" />
+      </label>
+      <button id="reload">状態更新</button>
+    </div>
+
+    <div id="items"></div>
+    <div id="message"></div>
+
+    <script>
+      const itemsEl = document.getElementById('items');
+      const messageEl = document.getElementById('message');
+      const userIdEl = document.getElementById('userId');
+
+      function formatRemaining(ms) {
+        if (!ms || ms <= 0) return '投票可能';
+        const totalSec = Math.ceil(ms / 1000);
+        const h = Math.floor(totalSec / 3600);
+        const m = Math.floor((totalSec % 3600) / 60);
+        const s = totalSec % 60;
+        return `${h}時間 ${m}分 ${s}秒`;
+      }
+
+      async function loadStatus() {
+        const userId = userIdEl.value.trim();
+        if (!userId) {
+          messageEl.textContent = '先にユーザーIDを入力してください。';
+          return;
+        }
+
+        const res = await fetch(`/api/status?userId=${encodeURIComponent(userId)}`);
+        const data = await res.json();
+        if (!res.ok) {
+          messageEl.textContent = data.error || '状態取得に失敗しました。';
+          return;
+        }
+
+        itemsEl.innerHTML = '';
+        data.items.forEach((it) => {
+          const box = document.createElement('div');
+          box.className = 'item';
+          box.innerHTML = `
+            <div><strong>項目 ${it.item}</strong></div>
+            <div class="muted">状態: ${it.canVote ? '投票可能' : '待機中'}</div>
+            <div class="muted">残り: ${formatRemaining(it.remainingMs)}</div>
+            <button ${it.canVote ? '' : 'disabled'} data-item="${it.item}">投票する</button>
+          `;
+          itemsEl.appendChild(box);
+        });
+
+        itemsEl.querySelectorAll('button[data-item]').forEach((btn) => {
+          btn.addEventListener('click', () => vote(btn.dataset.item));
+        });
+      }
+
+      async function vote(item) {
+        const userId = userIdEl.value.trim();
+        const res = await fetch('/api/vote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId, item }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          messageEl.textContent = data.error || '投票に失敗しました。';
+        } else {
+          messageEl.textContent = `項目 ${item} に投票しました。`;
+        }
+        await loadStatus();
+      }
+
+      document.getElementById('reload').addEventListener('click', loadStatus);
+    </script>
+  </body>
+</html>
